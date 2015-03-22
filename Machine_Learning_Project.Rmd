@@ -1,0 +1,199 @@
+---
+title: "Practical Machine Learning - Project"
+author: "Alberto Hevia"
+output: html_document
+---
+
+## Synopsis
+
+The project is based on the work of a group of enthusiasts who take measurements about themselves regularly to imporve their health, to find patterns in their behavior, or because they are tech geeks.
+You can get more information in <http://groupware.les.inf.puc-rio.br/har>.
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. The idea is to choose the best variables to predict the classe in the best possible way. Once the prediction model is configured, it will be tested with the prediction of 20 different test cases.
+
+The information is divided between a training dataset and a testing set (20 predictions + outcome).
+
+On this project, I am going to exclude some of the variables so I can get the model that best fits the outcome. I will use two different models: rpart and randomforest and compare them.
+
+Once the model is configured, I will apply it to the test dataset and compare the predictions with the outcome.
+
+
+## Getting the data
+
+The data was downloaded from: <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv> and <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>, and uploaded in R.
+
+```{r}
+
+training <- read.csv("pml-training.csv",header=TRUE,sep=",",row.names=1,na.strings=c("NA","#DIV/0!"))
+testing <- read.csv("pml-testing.csv",header=TRUE,sep=",",row.names=1,na.strings=c("NA","#DIV/0!"))
+
+```
+
+## Cleaning the data
+
+The first column is the user. This information is not very useful to try to predict the classe. Therefore let's remove this column (first column).
+
+```{r}
+
+training <- training[,2:ncol(training)]
+
+```
+
+I can see that some of the columns have a large number of NAs. This can cause some problems when training the model. In order to remove this NAs I am going to take the following actions:
+
+1. Removing the columns with at least 80% of values with NAs.
+
+```{r}
+
+remove.index <- c(0)
+for (j in 1:ncol(training)) {
+  aux <- training[,j]
+  if(length(aux)*0.75 <= length(aux[is.na(aux)])) {
+    remove.index[length(remove.index)+1] <- j
+  }
+}
+training <- training[,-remove.index]
+
+```
+
+As you can see in the results, there are several columns with irrelevant information (most of their values with NAs).
+
+2. Removing the NAs in the remaining columns.
+
+There are some columns where some NAs still remain. For this values I am going to obtain the main in the column and apply it to NAs.
+
+```{r}
+
+for(j in 1:ncol(training)) {
+  if(is.numeric(training[,j])) {
+    aux <- training[,j]
+    mean.col <- mean(aux[!is.na(aux)])
+    aux[is.na(aux)] <- mean.col
+    training[,j] <- aux
+  } else {
+      aux <- training[,j]
+      aux[is.na(aux)] <- rep("",length(aux[is.na(aux)]))
+      training[,j] <- aux
+  }
+}
+
+```
+
+3. Removing those columns with the same values for all rows.
+
+There are some columns on which the value is the same for all rows. This information is not relevant at all, so I will remove the columns.
+
+```{r}
+
+remove.index <- c(0)
+for (j in 1:ncol(training)) {
+  if (length(unique(training[,j]))==1) {
+    remove.index[length(remove.index)+1] <- j
+  }
+}
+if(length(remove.index)>1) {
+   training <- training[,-remove.index]
+}
+
+```
+
+
+4. Removing those variables with near zero variance.
+
+Let's start uploading the libraries:
+
+```{r echo=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+
+```
+
+```{r}
+
+near.zero <- nearZeroVar(training,saveMetrics=TRUE)
+variables <- row.names(subset(near.zero,near.zero$nzv==FALSE))
+training <- training[,variables]
+
+```
+
+
+## Training the model and comparing results.
+
+First of all, I am partioning the data between 60% of training and 40% of testing.
+
+```{r}
+
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+training.train <- training[inTrain,]
+training.test <- training[-inTrain,]
+
+```
+
+### First model: rparts
+
+The model is calculated without any preprocessing:
+
+```{r}
+
+fit.rpart <- train(classe ~ ., data=training.train, method="rpart", trControl=trainControl(method="cv"))
+pred.rpart <- predict(fit.rpart, training.test)
+
+```
+
+As we can see, the confusion matrix shows that the model is not very good, with a accuracy of: 62,96%
+
+```{r}
+
+confusionMatrix(pred.rpart, training.test$classe)
+
+```
+
+### Second Model: Random forest
+
+Let's calculate the model and see the confusion matrix:
+
+```{r}
+
+fit.rf <- train(classe ~ ., data=training.train, method="rf",
+                trControl=trainControl(method="cv"), 
+                number=5, allowParallel = TRUE)
+# Prediction
+pred.rf <- predict(fit.rf, training.test)
+
+# Matrix
+confusionMatrix(pred.rf, training.test$classe)
+
+```
+
+The model looks pretty good now, with an accuracy of: 99.92%
+
+## Predicting and test the final data set
+
+The last step is to predict the 20 observations and compare the results with the real informacion:
+
+```{r}
+
+pred.rf <- predict(fit.rf, testing)
+
+# Prediction
+print(pred.rf)
+```
+
+And finally, this is the algorthim to write the prediction:
+
+```{r}
+answers = pred.rf
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
+
